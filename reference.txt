@@ -1,0 +1,6 @@
+http://exoplanet.eu/catalog/hd_80606_b/
+    - orbital elements (except lan)
+    - star information
+
+http://adsabs.harvard.edu/abs/2014AAS...22341102W
+    - lan of planet
