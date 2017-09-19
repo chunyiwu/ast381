@@ -4,3 +4,6 @@ http://exoplanet.eu/catalog/hd_80606_b/
 
 http://adsabs.harvard.edu/abs/2014AAS...22341102W
     - lan of planet
+
+http://simbad.u-strasbg.fr/simbad/sim-id?Ident=HD+80607
+    - proper motion of star

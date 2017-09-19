@@ -9,6 +9,8 @@ classdef PlanetarySystemParam
 %       Exoplanets"
 % [2] Vallado, D. A., "Fundamentals of Astrodynamics and Applications"
 % [3] Wikipedia, "Julian Day"
+% [4] "Positional Astronomy, Annual parallax"
+%    <http://star-www.st-and.ac.uk/~fv/webnotes/>
 %
 % AUTHOR
 % Chun-Yi Wu
@@ -65,7 +67,8 @@ classdef PlanetarySystemParam
         deg = pi/180;           % radians to degrees converter
         day = 86400;            % day [s]
         yr = 86400 * 365.2422;  % year [s]
-        J2000 = 2451545.0;      % Julian date at J2000
+        J2000 = PlanetarySystemParam.juldate2datenum(2451545.0);      
+                                % datenum at J2000 epoch
     end
     
     
@@ -105,7 +108,7 @@ classdef PlanetarySystemParam
                     op.R1       = varargin{ 9};
                     op.R2       = varargin{10};
                     
-                    op.rStar    = varargin(11);
+                    op.rStar    = varargin{11};
                     op.RA       = varargin{12};
                     op.dec      = varargin{13};
                     
@@ -149,8 +152,58 @@ classdef PlanetarySystemParam
         end
         
         
-        
+                
         % relative state calculations
+        function [r,v] = oe2rv_t(op,t)
+        %%
+        % oe2rv
+        %
+        % Calculate the relative position and velocity vectors from the orbital
+        % elements and true anomaly.
+        %
+        % INPUT
+        % op - [PlanetarySystemParam] planetary system parameter object
+        % f  - [double] true anomaly
+        %
+        % OUTPUT
+        % r  - [double array 3x1] relative position vector
+        % v  - [double array 3x1] relative velocity vector
+        %
+        % REFERENCE
+        % [1] Murray, C. D., Correia, A. C. M., "Keplerian Orbits and Dynamics
+        %       of Exoplanets"
+        % [2] Vallado, D. A., "Fundamentals of Astrodynamics and
+        %       Applications"
+        
+        % solve mean anomaly
+        M = mod((t-op.tp)*86400*op.n,2*pi);
+           
+        % solve eccentric anomaly
+        E = M;
+
+        dE = 1000;
+        while ( abs(dE) > 1e-8 )
+            dE = (M-(E-op.ecc*sin(E))) / (1-op.ecc*cos(E));
+            E = E + dE;
+        end
+
+        % solve true anomaly
+        denom = 1 / ( 1 - op.ecc*cos(E) );
+        cosf = ( cos(E) - op.ecc ) * denom;
+        sinf = sqrt(1-op.ecc^2)*sin(E) * denom;
+
+        f = atan2(sinf,cosf);
+        
+        % solve position/velocity vector
+        p = op.sma * ( 1 - op.ecc^2 ); 
+        
+        rmag = p / ( 1 + op.ecc * cos(f) );
+        r = rmag * op.RM_pqw2eci * [cos(f); sin(f); 0];
+        
+        vmag = sqrt(op.mu/p);
+        v = vmag * op.RM_pqw2eci * [-sin(f); op.ecc+cos(f); 0];
+        
+        end
         function [r,v] = oe2rv(op,f)
         %%
         % oe2rv
@@ -159,7 +212,7 @@ classdef PlanetarySystemParam
         % elements and true anomaly.
         %
         % INPUT
-        % op - [PlanetarySystemParam] orbital parameter object
+        % op - [PlanetarySystemParam] planetary system parameter object
         % f  - [double] true anomaly
         %
         % OUTPUT
@@ -180,6 +233,136 @@ classdef PlanetarySystemParam
         vmag = sqrt(op.mu/p);
         v = vmag * op.RM_pqw2eci * [-sin(f); op.ecc+cos(f); 0];
         
+        end
+        function [r,z] = findSeparation(op,t)
+        %%
+        % findSeparation
+        %
+        % Find the separation distance between primary and secondary
+        % bodies.
+        
+        pos = op.oe2rv_t(t);
+        r = norm(pos(1:2));
+        z = pos(3);
+        end
+        function [rv] = findRadialVelocity(op,t)
+            [~,vel] = op.oe2rv_t(t);
+            rv = vel(3);
+        end
+        
+        
+        
+        % transit calculation
+        function t = solveTransitThreshold(op,t1,t2)
+        %%
+        % solveTransitThreshold
+        %
+        % Solve for either when the transit start or end, i.e. when the
+        % distance between the center of two bodies is the same as sum of
+        % body radii.
+        %
+        % Uses bisection method, so requires a range of time 
+        % with only one crossing.
+        %
+        % INPUT
+        % op - [PlanetarySystemParam] planetary system parameter object
+        % t1 - [double] lower bound for the range
+        % t2 - [double] upper bound for the range
+        
+        %% set up the function to solve
+        r = @(t) ( op.findSeparation(t) - (op.R1 + op.R2) );
+        
+        %% solve when r = 0
+        % check if one of the bound is already satisfying the condition
+        r1 = r(t1); r2 = r(t2);
+        if ( abs(r1) <= 1e-2 )
+            t = t1;
+            return;
+        end
+        
+        if ( abs(r2) <= 1e-2 )
+            t = t2;
+            return;
+        end
+        
+        % modified NR method
+        dt = t2 - t1;
+        dr = r2 - r1;
+        iter = 0;
+        
+        while ( (dt > 1e-9 && abs(dr) > 1e-3) && iter < 100 )
+            iter = iter + 1;
+            
+            tm = (t1+t2)/2;
+            rm = r(tm);
+            
+            if ( r1 * rm > 0 )
+                t1 = tm;
+                r1 = rm;
+            else
+                t2 = tm;
+                r2 = rm;
+            end
+            
+            dt = t2 - t1;
+            dr = r2 - r1;
+        end
+        
+        t = (t1+t2)/2;
+        end
+        function t = solveFrontBackThreshold(op,t1,t2)
+        %% 
+        % solveFrontBackThreshold
+        %
+        % Solve when the planet goes from being in front to behind (or vice
+        % versa) the star.
+        %
+        % INPUT
+        % op - [PlanetarySystemParam] planetary system parameter object
+        % t1 - [double] lower bound for the range
+        % t2 - [double] upper bound for the range
+        
+        %% solve when r = 0
+        % check if one of the bound is already satisfying the condition
+        [~,r1] = op.findSeparation(t1);
+        [~,r2] = op.findSeparation(t2);
+        if ( abs(r1) <= 1e-2 )
+            t = t1;
+            return;
+        end
+        
+        if ( abs(r2) <= 1e-2 )
+            t = t2;
+            return;
+        end
+        
+        % modified NR method
+        dt = t2 - t1;
+        dr = r2 - r1;
+        iter = 0;
+        
+        while ( dt > 1e-9 && abs(dr) > 1e-3 )
+            iter = iter + 1;
+            
+            tm = (t1+t2)/2;
+            [~,rm] = op.findSeparation(tm);
+            
+            if ( r1 * rm > 0 )
+                t1 = tm;
+                r1 = rm;
+            else
+                t2 = tm;
+                r2 = rm;
+            end
+            
+            dt = t2 - t1;
+            dr = r2 - r1;
+            
+            
+            fprintf('%s (%g) ~ %s (%g)\n',datestr(t1,31),r1,datestr(t2,31),r2);
+        end
+        
+        t = (t1+t2)/2;
         end
         
         
@@ -256,26 +439,7 @@ classdef PlanetarySystemParam
         vs = zeros(1,10001);
         
         for ( i = 1 : 10001 )
-            t = ts(i);
-            
-            M = mod((t-op.tp)*86400*op.n,2*pi);
-            
-            E = M;
-            
-            dE = 1000;
-            while ( abs(dE) > 1e-8 )
-                dE = (M-(E-op.ecc*sin(E))) / (1-op.ecc*cos(E));
-                E = E + dE;
-            end
-            
-            denom = 1 / ( 1 - op.ecc*cos(E) );
-            cosf = ( cos(E) - op.ecc ) * denom;
-            sinf = sqrt(1-op.ecc^2)*sin(E) * denom;
-            
-            f = atan2(sinf,cosf);
-            
-            [~,v] = op.oe2rv(f);
-            vs(i) = v(3);
+            vs(i) = op.findRadialVelocity(ts(i));
         end
         
         if ( max(vs)-min(vs) < 500 )
@@ -312,27 +476,9 @@ classdef PlanetarySystemParam
         zs = zeros(1,10001);
         
         for ( i = 1 : 10001 )
-            t = ts(i);
-            
-            M = mod((t-op.tp)*86400*op.n,2*pi);
-            
-            E = M;
-            
-            dE = 1000;
-            while ( abs(dE) > 1e-8 )
-                dE = (M-(E-op.ecc*sin(E))) / (1-op.ecc*cos(E));
-                E = E + dE;
-            end
-            
-            denom = 1 / ( 1 - op.ecc*cos(E) );
-            cosf = ( cos(E) - op.ecc ) * denom;
-            sinf = sqrt(1-op.ecc^2)*sin(E) * denom;
-            
-            f = atan2(sinf,cosf);
-            
-            [r,~] = op.oe2rv(f);
-            rs(i) = norm(r(1:2));
-            zs(i) = r(3);
+            [r,z] = op.findSeparation(ts(i));
+            rs(i) = r;
+            zs(i) = z;
         end
         
         plot(ts,rs/op.AU,'b-');
@@ -343,6 +489,104 @@ classdef PlanetarySystemParam
         ylabel('distance [AU]');
         legend('r=(x^2+y^2)^{1/2}','z');
         title(sprintf('Distance - %s',op.name1));
+        end
+        function [] = plotRAdecGraph(op,fnum,ts,parallax,pm)
+        %%
+        % plotRAdecGraph
+        %
+        % Plot the right ascension-declination graph of the star.
+        %
+        % INPUT
+        % fnum - [int] figure number
+        % t0   - [double] starting time in datenum
+        % tf   - [double] ending time in datenum
+        % parallax - [logical] if considering annual parallax motion (false
+        %       if omitted)
+        % propmotion - [double array] proper motion of star in milliarcsecond 
+        %           per year ([RA,dec]) (0 if omitted)
+        %
+        % REFERENCE
+        % [1] "Positional Astronomy, Annual parallax"
+        %    <http://star-www.st-and.ac.uk/~fv/webnotes/>
+        
+        %% calculations        
+        tdiv = length(ts);
+        ras = zeros(size(ts));
+        decs = zeros(size(ts));
+        year = datevec(ts(1));
+        year = year(1);
+        
+        for ( i = 1 : tdiv )
+            % heliocentric coordinate
+            a = op.RA;
+            d = op.dec;
+            
+            % add planet effect
+            pos = - op.mass_ratio * op.oe2rv_t(ts(i));
+            a = a - pos(2) / op.rStar;
+            d = d + pos(1) / op.rStar;
+            
+            % add proper motion
+            if ( exist('pm','var') )
+                a = a + pm(1) / 3600000 / 365.2425 * (ts(i)-op.J2000);
+                d = d + pm(2) / 3600000 / 365.2425 * (ts(i)-op.J2000);
+            end
+            
+            % add parallax
+            if ( parallax )
+                e = op.dms2deg(23,26,00);
+                p = 1/(op.rStar/op.pc) / 3600;
+                ls = - 2*pi/365.2425 * (ts(i)-vernalEquinox(year));
+                
+                sind = sin(d); cosd = cos(d);
+                sina = sin(a); cosa = cos(a);
+                sine = sin(e); cose = cos(e);
+                
+                sinb = sind*cose - cosd*sine*sina;
+                cosb = sqrt(1-sinb^2);
+                sinl = (sind-sinb*cose) / (cosb*sine);
+                cosl = (cosa*cosd) / (cosb);
+                l = atan2(sinl,cosl);
+                
+                dl =  p * sin(ls-l) / cosb;
+                db = -p * cos(ls-l) * sinb;
+                
+                a = a + dl;
+                d = d + db;                
+            end
+            
+            ras(i) = a;
+            decs(i) = d;
+        end
+        
+        %% plot
+        figure(fnum); clf(fnum); 
+        
+        % RA versus time
+        subplot(2,2,4);
+        plot((ras-op.RA)*3600000,ts,'b+');
+        datetick('y'); grid on;
+        xlabel('\DeltaRA [mas]');
+        
+        % dec verus time
+        subplot(2,2,1);
+        plot(ts,(decs-op.dec)*3600000,'b+');
+        datetick('x'); grid on;
+        ylabel('\Deltadec [mas]');
+        
+        % RA versus dec
+        subplot(2,2,2); axis equal;
+        plot((ras-op.RA)*3600000,(decs-op.dec)*3600000,'b+'); grid on;
+        
+        % notes
+        subplot(2,2,3); axis off;
+        text(0,3/4,'Reference position (J2000):','Unit','Normalized');
+        [h,m,s] = op.deg2hms(op.RA);
+        str = sprintf('RA: %d^h %d^m %g^s',h,m,s);
+        text(0.1,2/4,str,'Unit','Normalized');
+        [d,m,s] = op.deg2dms(op.dec);
+        str = sprintf('dec: %d^o %d'' %g"',d,m,s);
+        text(0.1,1/4,str,'Unit','Normalized');
         end
     end
     

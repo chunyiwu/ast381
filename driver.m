@@ -23,15 +23,30 @@ dec = PlanetarySystemParam.dms2deg(50,36,13);
 op = PlanetarySystemParam(sma,ecc,inc,lan,aop,tp,m1,m2,R1,R2,rStar,RA,dec, ...
     'HD 80606','HD 80606 b');
 
-% op.plotRelAstrometry(1);
-% op.plotAbsAstrometry(2);
-
-t0 = datenum(2017,08,01,00,00,00);
-tf = datenum(2017,12,31,00,00,00);
-
-% op.plotRadialVelocity(3,t0,tf);
-op.plotSeparation(4,t0,tf);
-
+% % op.plotRelAstrometry(1);
+% % op.plotAbsAstrometry(2);
+% 
+% t0 = datenum(2017,08,01,00,00,00);
+% tf = datenum(2017,12,31,00,00,00);
+% 
+% % op.plotRadialVelocity(3,t0,tf);
+% op.plotSeparation(4,t0,tf);
+% 
 t_0 = datenum(2017,12,01,00,00,00);
 t_f = datenum(2017,12,15,00,00,00);
 op.plotSeparation(5,t_0,t_f);
+
+% t1 = datenum(2017,12,07,11,00,00); 
+% t2 = datenum(2017,12,07,13,00,00);
+% datevec(op.solveTransitThreshold(t1,t2))
+% 
+% t1 = datenum(2017,12,07,22,00,00);
+% t2 = datenum(2017,12,08,02,00,00);
+% datevec(op.solveFrontBackThreshold(t1,t2))
+
+fnum = 6;
+ts = datenum(2017,08,01) + sort(rand(100,1)) * 153;
+parallax = true;
+pm = [40.64,10.17];
+% pm = [0,0];
+op.plotRAdecGraph(fnum,ts,parallax,pm)
